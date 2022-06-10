@@ -1,0 +1,4 @@
+.temp
+.clang-format
+
+*.out
