@@ -3,6 +3,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
+#include <unistd.h>
 
 // Print the sudoku kernel.
 __global__ void printSudokuDeviceKernel(int *sudoku, int sqrtN)
@@ -128,7 +129,7 @@ __global__ void printExpandedSudokuKernel(int *sudoku, int sqrtN, int expand)
   {
     printf(
         "#############################\nSUDOKU %d\n#############################\n", k);
-
+    int currentSudoku = k * n * n;
     for (int i = 0; i < n; ++i)
     {
       if (i % sqrtN == 0)
@@ -141,13 +142,13 @@ __global__ void printExpandedSudokuKernel(int *sudoku, int sqrtN, int expand)
         {
           printf("|");
         }
-        if (sudoku[i * n + j] <= 15)
+        if (sudoku[currentSudoku + i * n + j] <= 15)
         {
-          printf("%X ", sudoku[i * n + j]);
+          printf("%X ", sudoku[currentSudoku + i * n + j]);
         }
         else
         {
-          char c = 'F' + (sudoku[i * n + j] - 15);
+          char c = 'F' + (sudoku[currentSudoku + i * n + j] - 15);
           printf("%c ", c);
         }
       }
@@ -158,4 +159,19 @@ __global__ void printExpandedSudokuKernel(int *sudoku, int sqrtN, int expand)
       }
     }
   }
+}
+
+void waitForErrors()
+{
+  do
+  {
+    sleep(2);
+    printf("Looking for errors...\n");
+    cudaError_t error = cudaGetLastError();
+    printf("Error: %s\n", cudaGetErrorString(error));
+    if (error != cudaSuccess)
+    {
+      exit(1);
+    }
+  } while (true);
 }

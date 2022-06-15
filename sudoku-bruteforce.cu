@@ -11,6 +11,11 @@ __device__ int isSolvedDevice;
 int *readSudoku(const char *filename, int *n)
 {
   FILE *fp = fopen(filename, "r");
+  if (fp == NULL)
+  {
+    printf("Error: cannot open file %s\n", filename);
+    exit(1);
+  }
   int *sudoku = NULL;
   char line[1024];
 
@@ -79,9 +84,9 @@ void printSudoku(int *sudoku, int n)
 }
 
 // Check if the sudoku is solved.
-__device__ int isSudokuSolved(int *sudoku, int n)
+__device__ int isSudokuSolved(int *sudoku, int sqrtN)
 {
-  int sqrtN = sqrt((float)n);
+  int n = sqrtN * sqrtN;
   int i, j, k, l;
   for (i = 0; i < n; ++i)
   {
@@ -121,13 +126,13 @@ __device__ int isSudokuSolved(int *sudoku, int n)
 }
 
 // Check if the cell is valid.
-__device__ int isCellValidDevice(int *sudoku, int i, int j, int sqrtN)
+__device__ int isCellValidDevice(int *sudoku, int value, int i, int j, int sqrtN)
 {
   int n = sqrtN * sqrtN;
   // check row
   for (int k = 0; k < n; ++k)
   {
-    if (k != j && sudoku[i * n + j] == sudoku[i * n + k])
+    if (k != j && sudoku[i * n + k] == value)
     {
       return 0;
     }
@@ -135,7 +140,7 @@ __device__ int isCellValidDevice(int *sudoku, int i, int j, int sqrtN)
   // check column
   for (int k = 0; k < n; ++k)
   {
-    if (k != i && sudoku[i * n + j] == sudoku[k * n + j])
+    if (k != i && sudoku[k * n + j] == value)
     {
       return 0;
     }
@@ -147,7 +152,7 @@ __device__ int isCellValidDevice(int *sudoku, int i, int j, int sqrtN)
   {
     for (int l = startJ; l < startJ + sqrtN; ++l)
     {
-      if (k != i && l != j && sudoku[i * n + j] == sudoku[k * n + l])
+      if (k != i && l != j && sudoku[k * n + l] == value)
       {
         return 0;
       }
@@ -157,19 +162,18 @@ __device__ int isCellValidDevice(int *sudoku, int i, int j, int sqrtN)
 }
 
 // Check if the cell is valid.
-int isCellValidExanded(int *sudoku, int i, int j, int sqrtN, int expandI)
+int isCellValid(int *sudoku, int value, int i, int j, int sqrtN)
 {
   int n = sqrtN * sqrtN;
-  int currentSudoku =  expandI * n * n;
   for (int k = 0; k < n; ++k)
   {
     // check row
-    if (k != j && sudoku[currentSudoku + i * n + j] == sudoku[currentSudoku + i * n + k])
+    if (k != j && sudoku[i * n + k] == value)
     {
       return 0;
     }
     // check column
-    if (k != i && sudoku[currentSudoku + i * n + j] == sudoku[currentSudoku + k * n + j])
+    if (k != i && sudoku[k * n + j] == value)
     {
       return 0;
     }
@@ -181,7 +185,7 @@ int isCellValidExanded(int *sudoku, int i, int j, int sqrtN, int expandI)
   {
     for (int l = startJ; l < startJ + sqrtN; ++l)
     {
-      if (k != i && l != j && sudoku[currentSudoku + i * n + j] == sudoku[currentSudoku + k * n + l])
+      if (k != i && l != j && sudoku[k * n + l] == value)
       {
         return 0;
       }
@@ -196,12 +200,9 @@ __device__ int *recursionBruteforce(int *sudoku, int sqrtN, int id)
   // printf("Thread %d\n", id);
   int n = sqrtN * sqrtN;
 
-  // check if is last cell
-  if (id == n * n)
-  {
-    printf("Last cell\n");
-    return NULL;
-  }
+  // get first empty cell
+  for (; sudoku[id] != 0 && id < n * n; id++)
+    ;
 
   // if sudoku has been solved already, return
   if (isSolvedDevice == 1)
@@ -210,31 +211,34 @@ __device__ int *recursionBruteforce(int *sudoku, int sqrtN, int id)
     return NULL;
   }
 
-  // if is solved, notfy all threads and return
-  if (isSudokuSolved(sudoku, n) == 1)
+  // check if is last cell
+  if (id >= n * n)
   {
-    printf("Sudoku solved\n");
-    isSolvedDevice = 1;
-    return sudoku;
+    // if is solved, notfy all threads and return
+    if (isSudokuSolved(sudoku, sqrtN) == 1)
+    {
+      printf("Sudoku solved\n");
+      isSolvedDevice = 1;
+      return sudoku;
+    }
+    else
+    {
+      return NULL;
+    }
   }
 
   // get the row and column of the cell
   int row = id / n, col = id % n;
-  // printf("Thread %d | row: %d, col: %d | %d, %d\n", id, row, col, sudoku[id], sudoku[row * n + col]);
-  // if the cell is empty, try all possible values
-  for (; sudoku[row * n + col] != 0; id++)
-  {
-    row = id / n;
-    col = id % n;
-  }
+  printf("Thread %d | row: %d, col: %d | %d\n", blockIdx.x, row, col, sudoku[id]);
 
-  for (int i = 1; i <= n; ++i)
+  // if the cell is empty, try all possible values
+  for (int testValue = 1; testValue <= n; ++testValue)
   {
-    // printf("[TESTING] %d: %d\n", id, i);
-    sudoku[row * n + col] = i;
-    if (isCellValidDevice(sudoku, row, col, sqrtN) == 1)
+    // printf("[TESTING] %d: %d\n", id, testValue);
+    if (isCellValidDevice(sudoku, testValue, row, col, sqrtN) == 1)
     {
-      // printf("Ok i:%d, %d\n", id, i);
+      sudoku[id] = testValue;
+      // printf("Ok testValue:%d, %d\n", id, testValue);
       // if the cell is valid, try next cell
       int *solution = recursionBruteforce(sudoku, sqrtN, id + 1);
       // printf("[END] Ok i:%d j:%d, %d, %d\n", row, col, i, solution);
@@ -242,22 +246,20 @@ __device__ int *recursionBruteforce(int *sudoku, int sqrtN, int id)
       {
         return solution;
       }
+      sudoku[id] = 0;
     }
-    sudoku[row * n + col] = 0;
-    // printf("Not ok i:%d j:%d, %d\n", row, col, i);
   }
 
   return NULL;
 }
 
 // Kernel to call recursion on device.
-__global__ void bruteforceKernel(int *sudoku, int sqrtN, int *solution)
+__global__ void bruteforceKernel(int *expandedSudoku, int sqrtN, int *solution)
 {
-  // Get the thread id
   int n = sqrtN * sqrtN;
-  int id = blockIdx.x * blockDim.x + threadIdx.x;
-
-  int *result = recursionBruteforce(sudoku, sqrtN, id);
+  printf("Executing expanded sudoku #%d\n", blockIdx.x);
+  int *result = recursionBruteforce(expandedSudoku + blockIdx.x * n * n, sqrtN, 0);
+  printf("[END] %d\n", result);
   if (result != NULL)
   {
     // deep copy the solution to the host
@@ -268,70 +270,111 @@ __global__ void bruteforceKernel(int *sudoku, int sqrtN, int *solution)
   }
 }
 
-int *expandSudoku(int *sudoku, int n, int expand)
+// Get a list of possible sudoku for the given sudoku.
+int **bfsSudokuSolver(int *sudoku, int sqrtN, int *count)
 {
-  int sqrtN = sqrt(n);
-  int *expandedSudoku = (int *)malloc(sizeof(int) * n * n * expand);
-  srand(time(NULL));
-  // expand the sudoku filling the empty cells with random numbers between 1 and n
-  for (int i = 0; i < expand; ++i)
+  int n = sqrtN * sqrtN;
+  int **results = NULL;
+  *count = 0;
+
+  // find good values for an empty cell
+  // get an empty cell
+  int idx = 0;
+  do
   {
-    // deep copy the sudoku to the expanded sudoku
-    for (int j = 0; j < n * n; ++j)
+    idx = rand() % (n * n);
+  } while (sudoku[idx] != 0);
+  // test every possible value
+  for (int testValue = 1; testValue <= n; ++testValue)
+  {
+    if (isCellValid(sudoku, testValue, idx / n, idx % n, sqrtN) == 1)
     {
-      expandedSudoku[i * n * n + j] = sudoku[j];
+      int *solution = (int *)malloc(n * n * sizeof(int));
+      memcpy(solution, sudoku, n * n * sizeof(int));
+      solution[idx] = testValue;
+      results = (int **)realloc(results, ((*count) + 1) * sizeof(int *));
+      results[(*count)++] = solution;
     }
+  }
+  return results;
+}
 
-    // get the empty cell
-    int idx = 0;
-    do
-    {
-      idx = rand() % (n * n) + i * n * n;
-    } while (expandedSudoku[idx] != 0);
+int *expandSudoku(int *sudoku, int n, int expand, int *count)
+{
+  if (expand <= 1)
+  {
+    // deep copy the sudoku
+    int *solution = (int *)malloc(n * n * sizeof(int));
+    memcpy(solution, sudoku, n * n * sizeof(int));
+    *count = 1;
+    return solution;
+  }
+  int sqrtN = sqrt(n);
+  int *expandedSudoku = (int *)malloc(sizeof(int) * n * n);
 
-    // try to fill the cell with a number between 1 and n
-    int r = (idx - i * n * n) / n;
-    int c = (idx - i * n * n) % n;
-    for (int j = 1; j <= n; ++j)
+  // solve first cell
+  *count = 0;
+  int **solutions = bfsSudokuSolver(sudoku, sqrtN, count);
+  expand -= *count;
+
+  // if not enough solutions, solve next cells
+  for (int i = 0; i < *count && expand > 0; i++)
+  {
+    int *sudokuToExpand = solutions[i];
+    int nextCount = 0;
+    int **nextSolutions = bfsSudokuSolver(sudokuToExpand, sqrtN, &nextCount);
+  
+    // append the next solutions to solutions
+    solutions = (int **)realloc(solutions, ((*count) + nextCount) * sizeof(int *));
+    for (int j = 0; j < nextCount; j++)
     {
-      expandedSudoku[idx] = j;
-      if (isCellValidExanded(expandedSudoku, r, c, sqrtN, i) == 1)
-      {
-        break;
-      }
+      solutions[*count + j] = nextSolutions[j];
     }
+    expand -= nextCount;
+    (*count) += nextCount;
+  }
+
+  // copy the solutions to the expanded sudoku
+  expandedSudoku = (int *)realloc(expandedSudoku, (*count) * n * n * sizeof(int));
+  for (int i = 0; i < *count; i++)
+  {
+    memcpy(expandedSudoku + i * n * n, solutions[i], n * n * sizeof(int));
   }
   return expandedSudoku;
 }
 
 int main(int argc, char *argv[])
 {
+  srand(time(NULL));
   int n = 0;
   int *sudoku = readSudoku(argv[1], &n);
   int sqrtN = sqrt(n);
   int expand = (int)atoi(argv[2]);
-  int blockSize = n;
+  int blockSize = n * n;
 
   int isSolved = 0;
   cudaMemcpyToSymbol(isSolvedDevice, &isSolved, sizeof(int), 0, cudaMemcpyHostToDevice);
-  printSudoku(sudoku, n);
+
   // expand the sudoku filling some empty cells
-  int *expandedSudoku = expandSudoku(sudoku, n, expand);
+  int realExpand = 1;
+  int *expandedSudoku = expandSudoku(sudoku, n, expand, &realExpand);
   // copy to device
   int *expandedSudokuDevice = NULL;
-  cudaMalloc(&expandedSudokuDevice, n * n * expand * sizeof(int));
-  cudaMemcpy(expandedSudokuDevice, expandedSudoku, expand * n * n * sizeof(int), cudaMemcpyHostToDevice);
-  // printExpandedSudoku(expandedSudoku, n, expand);
-  // printExpandedSudokuKernel<<<1,1>>>(expandedSudokuDevice, sqrtN, expand);
+  cudaMalloc((void **)&expandedSudokuDevice, realExpand * n * n * sizeof(int));
+  cudaMemcpy(expandedSudokuDevice, expandedSudoku, realExpand * n * n * sizeof(int), cudaMemcpyHostToDevice);
+  // printExpandedSudoku(expandedSudoku, n, realExpand);
+  // printExpandedSudokuKernel<<<1, 1>>>(expandedSudokuDevice, sqrtN, realExpand);
 
   // create solution array on device
   int *solutionDevice = NULL;
   cudaMalloc((void **)&solutionDevice, n * n * sizeof(int));
-
+  
   // create the kernel and wait for it to finish
-  printf("Starting kernel\n");
-  bruteforceKernel<<<expand, 1>>>(expandedSudokuDevice, sqrtN, solutionDevice);
+  printf("Starting kernel... expanded sudoku: %d\n", realExpand);
+  bruteforceKernel<<<realExpand, 1>>>(expandedSudokuDevice, sqrtN, solutionDevice);
+  // waitForErrors();
   cudaDeviceSynchronize();
+  printf("Kernel finished...\n");
 
   // copy and print isSolved from device to host
   cudaMemcpyFromSymbol(&isSolved, isSolvedDevice, sizeof(int), 0, cudaMemcpyDeviceToHost);
