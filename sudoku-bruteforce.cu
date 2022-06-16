@@ -252,7 +252,7 @@ __device__ int *recursionBruteforce(int *sudoku, int sqrtN, int id)
 }
 
 // Kernel to call recursion on device.
-__global__ void bruteforceKernel(int *expandedSudoku, int sqrtN, int *solution)
+__global__ void bruteforceKernel(int *expandedSudoku, int sqrtN, int *solution, int *sudokuSpace)
 {
   int n = sqrtN * sqrtN;
   int totalCells = n * n;
@@ -264,20 +264,12 @@ __global__ void bruteforceKernel(int *expandedSudoku, int sqrtN, int *solution)
 
   printf("%d, %d\n", startID, cellsPerThread);
   // For each cell assigned to the thread, try all possible values.
-  int *sudokuToTest = NULL;
-  cudaMalloc((void **)&sudokuToTest, n * n * sizeof(int));
-  if(sudokuToTest == NULL)
-  {
-    printf("Error allocating memory\n"); //!! Error allocating memory
-    return;
-  } else {
-    printf("Memory allocated\n");
-  }
+  int *sudokuToTest = sudokuSpace + startID + blockIdx.x * totalCells;
   for (int i = 0; i < n * n; ++i)
   {
     sudokuToTest[i] = expandedSudoku[blockIdx.x * n * n + i];
   }
-  printf("Copied sudoku\n"); //flow doesn't go here
+
   for (int id = startID; id - startID <= cellsPerThread; ++id)
   {
     printf("[TESTING] %d: %d\n", id, sudokuToTest[id]);
@@ -295,7 +287,7 @@ __global__ void bruteforceKernel(int *expandedSudoku, int sqrtN, int *solution)
         sudokuToTest[id] = testValue;
         // if the cell is valid, try next cell
         int *result = recursionBruteforce(sudokuToTest, sqrtN, id + 1);
-        if (result != NULL && isSolvedDevice == 0)
+        if (result != NULL)
         {
           isSolvedDevice = 1;
           memcpy(solution, result, n * n * sizeof(int));
@@ -409,8 +401,10 @@ int main(int argc, char *argv[])
   // create the kernel and wait for it to finish
   printf("Starting kernel... expanded sudoku: %d\n", realExpand);
   // cudaDeviceSetLimit(cudaLimitMallocHeapSize, sizeof(int) * n * n * blockSize);
-  bruteforceKernel<<<realExpand, blockSize>>>(expandedSudokuDevice, sqrtN, solutionDevice);
-  // waitForErrors();
+  int *sudokuSpace = NULL;
+  cudaMalloc((void **)&sudokuSpace, sizeof(int) * n * n * realExpand * blockSize);
+  bruteforceKernel<<<realExpand, blockSize>>>(expandedSudokuDevice, sqrtN, solutionDevice, sudokuSpace);
+  waitForErrors();
   cudaDeviceSynchronize();
   printf("Kernel finished...\n");
 
