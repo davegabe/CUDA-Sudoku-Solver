@@ -165,10 +165,20 @@ void waitForErrors()
 {
   do
   {
-    sleep(2);
+    sleep(1);
     printf("Looking for errors...\n");
+
+    // size_t available, total;
+    // cudaMemGetInfo(&available, &total);
+
+    // int *buf_d = 0;
+    // size_t nwords = total / sizeof(int);
+    // size_t words_per_Mb = 1 << 20 / sizeof(int);
+    // printf("Memory available: %zu | Memory total: %zu\n", available, total);
+
     cudaError_t error = cudaGetLastError();
     printf("Error: %s\n", cudaGetErrorString(error));
+    
     if (error != cudaSuccess)
     {
       exit(1);
