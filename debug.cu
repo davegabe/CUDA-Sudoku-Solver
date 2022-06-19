@@ -80,9 +80,9 @@ __device__ void printSudokuDevice(int *sudoku, int sqrtN)
 }
 
 // Print the expanded sudoku.
-void printExpandedSudoku(int *sudoku, int n, int expand)
+void printExpandedSudoku(int *sudoku, int sqrtN, int expand)
 {
-  int sqrtN = sqrt(n);
+  int n = sqrtN * sqrtN;
   printf("#############################\nEXPANDED SUDOKU\n#############################\n");
   for (int k = 0; k < expand; ++k)
   {

@@ -47,9 +47,9 @@ int *readSudoku(const char *filename, int *n)
 }
 
 // Print the sudoku.
-void printSudoku(int *sudoku, int n)
+void printSudoku(int *sudoku, int sqrtN)
 {
-  int sqrtN = sqrt(n);
+  int n = sqrtN * sqrtN;
   printf(
       "#############################\nSUDOKU\n#############################\n");
 
@@ -197,32 +197,32 @@ int isCellValid(int *sudoku, int value, int i, int j, int sqrtN)
 // Each thread is responsible for a separate tree.
 __device__ int *iterativeBruteforce(int *sudoku, int sqrtN, int *stackSpace)
 {
-  // printf("Thread %d\n", id);
   int n = sqrtN * sqrtN;
-  int i = 0;
-  while (i < n * n)
+  int i = 0;                // current cell
+  int stackIndexesSize = 0; // number of elements in stackSpace
+  while (i < n * n)         // while there are still cells to fill
   {
-    // if sudoku has been solved already, return
-    if (isSolvedDevice == 1)
-    {
-      return NULL;
-    }
-    // get first empty cell
+
+    // get first empty cell (ignore cells with value != 0)
     if (sudoku[i] != 0)
     {
       i++;
       continue;
     }
 
-    // get the row and column of the cell
-    // printf("Thread %d | row: %d, col: %d | %d\n", blockIdx.x, row, col, sudoku[i]);
-
-    int stackIndexesSize = 0;
-    int foundOneValid;
+    int foundOneValid; // if a valid value has been found for a cell
     do
     {
+      // if sudoku has been solved already, return
+      if (isSolvedDevice == 1)
+      {
+        return NULL;
+      }
       foundOneValid = 0;
-      int row = i / n, col = i % n;
+      int row = i / n, col = i % n; // get the row and column of the cell
+      // printSudoku(sudoku, sqrtN);
+      // printf("%d : %d %d\n", i, row, col);
+
       // if the cell is empty, try all possible values
       for (int testValue = sudoku[i] + 1; testValue <= n; ++testValue)
       {
@@ -234,10 +234,17 @@ __device__ int *iterativeBruteforce(int *sudoku, int sqrtN, int *stackSpace)
           foundOneValid = 1;
 
           // push the cell to the stack
-          stackSpace[stackIndexesSize++] = i; //!! NON RISOLVE I SUDOKU NEMMENO QUELLI VUOTI, SI FERMA A 15 CELLE OGNI VOLTA
+          stackSpace[stackIndexesSize++] = i;
           break;
         }
       }
+
+      // //print stackSpace
+      // for (int j = 0; j < stackIndexesSize; ++j)
+      // {
+      //     printf("%d | ", j, stackSpace[j]);
+      // }
+      // printf("\n");
 
       // if no value is valid, go back to the previous modified cell
       if (foundOneValid == 0)
@@ -256,7 +263,7 @@ __device__ int *iterativeBruteforce(int *sudoku, int sqrtN, int *stackSpace)
     i++;
   }
 
-  // if is solved, notfy all threads and return
+  // if is solved, return
   if (isSudokuSolved(sudoku, sqrtN) == 1)
   {
     return sudoku;
@@ -273,37 +280,41 @@ __global__ void bruteforceKernel(int *expandedSudoku, int sqrtN, int *solution, 
   int n = sqrtN * sqrtN;
   int totalCells = n * n;
   int cellsPerThread = totalCells / blockDim.x;
+  int threadId = blockIdx.x * blockDim.x + threadIdx.x;
 
   // Each thread is responsible for a separate execution tree.
   int startID = threadIdx.x * cellsPerThread; // Get first cell assigned to the thread.
-  // printf("Executing expanded sudoku #%d cells in [%d, %d]\n", blockIdx.x, startID, startID + cellsPerThread - 1);
+  // printf("Executing expanded sudoku #%d cells in [%d, %d] on thread #%d\n", blockIdx.x, startID, startID + cellsPerThread - 1, threadIdx.x);
 
-  // printf("STARTID %d, CELLSPERTHREAD %d\n", startID, cellsPerThread);
   // For each cell assigned to the thread, try all possible values.
-  int *sudokuToTest = sudokuSpace + (blockIdx.x * blockDim.x + threadIdx.x) * totalCells ; // Get the sudoku sèace the thread is responsible for.
+  int *sudokuToTest = sudokuSpace + threadId * totalCells; // Get the sudoku space the thread is responsible for.
 
-  for (int id = startID; id - startID <= cellsPerThread; ++id)
+  for (int i = 0; i < totalCells; ++i)
+  {
+    sudokuToTest[i] = expandedSudoku[blockIdx.x * totalCells + i];
+  }
+  for (int id = startID; id - startID <= cellsPerThread; ++id) // For each cell assigned to the thread.
   {
     // printf("[TESTING] %d: %d\n", id, sudokuToTest[id]);
     for (int testValue = 1; testValue <= n; ++testValue)
     {
-      for (int i = 0; i < totalCells; ++i) // !! questo è messo qui per test, sarebbe da riportare fuori ai due cicli e farlo solo una volta
-      {
-        sudokuToTest[i] = expandedSudoku[blockIdx.x * blockDim.x * totalCells + i];
-      }
       // printf("[TESTING] %d: %d\n", id, testValue);
       // if sudoku has been solved already, return
       if (isSolvedDevice == 1)
       {
         return;
       }
-      if (sudokuToTest[id] == 0 && isCellValidDevice(sudokuToTest, testValue, id / n, id % n, sqrtN) == 1)
+      if (sudokuToTest[id] != 0)
+      {
+        continue;
+      }
+      int row = id / n, col = id % n; // get the row and column of the cell
+      if (isCellValidDevice(sudokuToTest, testValue, row, col, sqrtN) == 1)
       {
         // printf("Ok testValue:%d, %d\n", id, testValue);
         sudokuToTest[id] = testValue;
         // if the cell is valid, try next cell
-        int *result = iterativeBruteforce(sudokuToTest, sqrtN, stackSpace + (blockIdx.x * blockDim.x + threadIdx.x) * totalCells);
-        // printf("RESULT: %d \n", result);
+        int *result = iterativeBruteforce(sudokuToTest, sqrtN, stackSpace + threadId * totalCells);
         if (result != NULL)
         {
           isSolvedDevice = 1;
@@ -345,8 +356,9 @@ int **bfsSudokuSolver(int *sudoku, int sqrtN, int *count)
   return results;
 }
 
-int *expandSudoku(int *sudoku, int n, int expand, int *count)
+int *expandSudoku(int *sudoku, int sqrtN, int expand, int *count)
 {
+  int n = sqrtN * sqrtN;
   if (expand <= 1)
   {
     // deep copy the sudoku
@@ -355,7 +367,6 @@ int *expandSudoku(int *sudoku, int n, int expand, int *count)
     *count = 1;
     return solution;
   }
-  int sqrtN = sqrt(n);
   int *expandedSudoku = (int *)malloc(sizeof(int) * n * n);
 
   // solve first cell
@@ -403,12 +414,12 @@ int main(int argc, char *argv[])
 
   // expand the sudoku filling some empty cells
   int realExpand = 1;
-  int *expandedSudoku = expandSudoku(sudoku, n, expand, &realExpand);
+  int *expandedSudoku = expandSudoku(sudoku, sqrtN, expand, &realExpand);
   // copy to device
   int *expandedSudokuDevice = NULL;
   cudaMalloc((void **)&expandedSudokuDevice, realExpand * n * n * sizeof(int));
   cudaMemcpy(expandedSudokuDevice, expandedSudoku, realExpand * n * n * sizeof(int), cudaMemcpyHostToDevice);
-  printExpandedSudoku(expandedSudoku, n, realExpand);
+  // printExpandedSudoku(expandedSudoku, sqrtN, realExpand);
   // printExpandedSudokuKernel<<<1, 1>>>(expandedSudokuDevice, sqrtN, realExpand);
 
   // create solution array on device
@@ -416,7 +427,7 @@ int main(int argc, char *argv[])
   cudaMalloc((void **)&solutionDevice, n * n * sizeof(int));
 
   // create the kernel and wait for it to finish
-  printf("Starting kernel... expanded sudoku: %d\n", realExpand);
+  printf("Starting kernel... (executing %d blocks with %d threads)\n", realExpand, blockSize);
   // cudaDeviceSetLimit(cudaLimitMallocHeapSize, sizeof(int) * n * n * blockSize);
   int *sudokuSpace = NULL;
   cudaMalloc((void **)&sudokuSpace, sizeof(int) * n * n * realExpand * blockSize); // each thread has its own sudoku copy (n*n)
@@ -437,7 +448,7 @@ int main(int argc, char *argv[])
 
   if (isSolved == 1)
   {
-    printSudoku(sudoku, n);
+    printSudoku(sudoku, sqrtN);
   }
   else
   {
@@ -447,3 +458,4 @@ int main(int argc, char *argv[])
   free(sudoku);
   return 0;
 }
+//!! actually takes more than 2 seconds to solve a sudoku and CUDA breaks it (https://forums.developer.nvidia.com/t/cuda-kernel-crash/55225/4)
