@@ -197,30 +197,28 @@ int isCellValid(int *sudoku, int value, int i, int j, int sqrtN)
 int *iterativeBruteforce(int *sudoku, int sqrtN, int *stackSpace)
 {
     int n = sqrtN * sqrtN;
-    int i = 0;                // current cell
-    int stackIndexesSize = 0; // number of elements in stackSpace
-    while (i < n * n)         // while there are still cells to fill
+    int currentCell = 0;     // current cell watching in the stack
+    int countEmptyCells = 0; // number of empty cells
+    for (int j = 0; j < n * n; ++j)
     {
-        // if sudoku has been solved already, return
-        if (isSolved == 1)
+        if (sudoku[j] == 0)
         {
-            return NULL;
+            stackSpace[countEmptyCells++] = j;
         }
-
-        // get first empty cell (ignore cells with value != 0)
-        if (sudoku[i] != 0)
-        {
-            i++;
-            continue;
-        }
-
+    }
+    while (currentCell < countEmptyCells) // while there are still cells to fill
+    {
+        int i = stackSpace[currentCell];
         int foundOneValid; // if a valid value has been found for a cell
         do
         {
+            // if sudoku has been solved already, return
+            if (isSolved == 1)
+            {
+                return NULL;
+            }
             foundOneValid = 0;
             int row = i / n, col = i % n; // get the row and column of the cell
-            // printSudoku(sudoku, sqrtN);
-            // printf("%d : %d %d\n", i, row, col);
 
             // if the cell is empty, try all possible values
             for (int testValue = sudoku[i] + 1; testValue <= n; ++testValue)
@@ -232,12 +230,12 @@ int *iterativeBruteforce(int *sudoku, int sqrtN, int *stackSpace)
                     sudoku[i] = testValue;
                     foundOneValid = 1;
 
-                    // push the cell to the stack
-                    stackSpace[stackIndexesSize++] = i;
+                    // go to the next cell
+                    currentCell++;
                     break;
                 }
             }
-            
+
             // //print stackSpace
             // for (int j = 0; j < stackIndexesSize; ++j)
             // {
@@ -245,26 +243,24 @@ int *iterativeBruteforce(int *sudoku, int sqrtN, int *stackSpace)
             // }
             // printf("\n");
 
-
             // if no value is valid, go back to the previous modified cell
             if (foundOneValid == 0)
             {
                 sudoku[i] = 0;
-                if (stackIndexesSize > 0)
+                if (currentCell > 0)
                 {
-                    i = stackSpace[--stackIndexesSize];
+                    i = stackSpace[--currentCell];
                 }
                 else
                 {
-                    i = n * n;
+                    currentCell = countEmptyCells;
                 }
             }
-        } while (foundOneValid == 0 && i < n * n); // repeat going back until a valid value is found
-        i++;
+        } while (foundOneValid == 0 && currentCell < countEmptyCells); // repeat going back until a valid value is found
     }
 
     // if is solved, return
-    if (isSudokuSolved(sudoku, sqrtN) == 1)
+    if (currentCell == countEmptyCells && isSudokuSolved(sudoku, sqrtN) == 1)
     {
         return sudoku;
     }
@@ -358,7 +354,7 @@ int main(int argc, char *argv[])
     // create solution array on device
     int *solutionDevice = (int *)malloc(n * n * sizeof(int));
 
-    int *stackSpace = (int *)malloc(sizeof(int) * n * n);  // each thread has its own stack (n*n)
+    int *stackSpace = (int *)malloc(sizeof(int) * n * n); // each thread has its own stack (n*n)
 
     int *result = iterativeBruteforce(sudoku, sqrtN, stackSpace);
     if (result != NULL)
