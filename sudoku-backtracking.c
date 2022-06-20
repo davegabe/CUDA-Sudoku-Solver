@@ -1,17 +1,17 @@
-#include<stdio.h>
-#include<stdlib.h>
+#include <stdio.h>
+#include <stdlib.h>
 
-int isSolved;
-
-int *readSudoku(const char *filename, int *n) 
+int **readSudoku(const char *filename, int *n)
 {
-    FILE *fp = fopen(filename, "r");
+
+  FILE *fp = fopen(filename, "r");
   if (fp == NULL)
   {
     printf("Error: cannot open file %s\n", filename);
     exit(1);
   }
-  int *sudoku = NULL;
+
+  int **sudoku = NULL;
   char line[1024];
 
   // read the size of the sudoku
@@ -19,20 +19,19 @@ int *readSudoku(const char *filename, int *n)
   {
     char *scan = line;
     sscanf(scan, "%d", n);
-    sudoku = (int *)malloc(*n * *n * sizeof(sudoku));
+    sudoku = malloc(*n * sizeof(sudoku));
 
     // read the sudoku
-    for (int i = 0; i < *n * *n; ++i)
+    for (int i = 0; i < *n; ++i)
     {
-      int t = -1;
-      if (fscanf(fp, "%X", &t) != 1)
+      sudoku[i] = calloc(*n, sizeof(int));
+      for (int j = 0; j < *n; ++j)
       {
-        char c;
-        fscanf(fp, "%c", &c);
-        c = tolower(c);
-        t = (c - 'f') + 15;
+        int t;
+        fscanf(fp, "%d", &t);
+        // value of cell is the same as the value in the file
+        (sudoku[i][j]) = t;
       }
-      sudoku[i] = t;
     }
 
     fclose(fp);
@@ -42,7 +41,7 @@ int *readSudoku(const char *filename, int *n)
 }
 
 // Print the sudoku.
-void printSudoku(int *sudoku, int n)
+void printSudoku(int **sudoku, int n)
 {
   int sqrtN = sqrt(n);
   printf(
@@ -60,13 +59,13 @@ void printSudoku(int *sudoku, int n)
       {
         printf("|");
       }
-      if (sudoku[i * n + j] <= 15)
+      if (sudoku[i][j] <= 15)
       {
-        printf("%X ", sudoku[i * n + j]);
+        printf("%X ", sudoku[i][j]);
       }
       else
       {
-        char c = 'F' + (sudoku[i * n + j] - 15);
+        char c = 'F' + (sudoku[i][j] - 15);
         printf("%c ", c);
       }
     }
@@ -78,73 +77,80 @@ void printSudoku(int *sudoku, int n)
   }
 }
 
-int isSudokuSolved(int *sudoku, int sqrtN)
+int iterativeSolveSudoku(int **sudoku, int sqrtN)
 {
   int n = sqrtN * sqrtN;
-  int i, j, k, l;
-  for (i = 0; i < n; ++i)
+
+  for (int i = 0; i < n; ++i)
   {
-    for (j = 0; j < n; ++j)
+    for (int j = 0; j < n; ++j)
     {
-      if (sudoku[i * n + j] == 0)
+      if (sudoku[i][j] == 0)
       {
-        return 0;
-      }
-      for (k = 0; k < n; ++k)
-      {
-        if (k != j && sudoku[i * n + j] == sudoku[i * n + k])
+        for (int value = 0; value <= n; ++value)
         {
-          return 0;
-        }
-      }
-      for (k = 0; k < n; ++k)
-      {
-        if (k != i && sudoku[i * n + j] == sudoku[k * n + j])
-        {
-          return 0;
-        }
-      }
-      for (k = i / sqrtN * sqrtN; k < i / sqrtN * sqrtN + sqrtN; ++k)
-      {
-        for (l = j / sqrtN * sqrtN; l < j / sqrtN * sqrtN + sqrtN; ++l)
-        {
-          if (k != i && l != j && sudoku[i * n + j] == sudoku[k * n + l])
+          if (isCellValid(sudoku, value, i, j, sqrtN) && isRowValid(sudoku, value, i, sqrtN) && isColValid(sudoku, value, j, sqrtN))
           {
-            return 0;
+            sudoku[i][j] = value;
+            break;
           }
         }
       }
     }
   }
-  return 1;
+
+  if (isSolved(sudoku, n) == 1)
+  {
+    printSudoku(sudoku, n);
+  }
+
+  else
+  {
+    printf("No solution found");
+  }
 }
 
-int is CellValid1(int *sudoku, int value,  )
-// Check if the cell is valid.
-int isCellValid(int *sudoku, int value, int i, int j, int sqrtN)
+int recursiveSolveSudoku(int **sudoku, int sqrtN)
 {
   int n = sqrtN * sqrtN;
-  for (int k = 0; k < n; ++k)
+
+  for (int i = 0; i < n; ++i)
   {
-    // check row
-    if (k != j && sudoku[i * n + k] == value)
+    for (int j = 0; j < n; ++j)
     {
-      return 0;
-    }
-    // check column
-    if (k != i && sudoku[k * n + j] == value)
-    {
-      return 0;
+      if (sudoku[i][j] == 0)
+      {
+        for (int value = 0; value <= n; ++value)
+        {
+          if (isCellValid(sudoku, value, i, j, sqrtN) && isRowValid(sudoku, value, i, sqrtN) && isColValid(sudoku, value, j, sqrtN))
+          {
+            sudoku[i][j] = value;
+            recursiveSolveSudoku(sudoku, sqrtN);
+          }
+        }
+      }
     }
   }
-  // check grid
-  int startI = i / sqrtN * sqrtN;
-  int startJ = j / sqrtN * sqrtN;
-  for (int k = startI; k < startI + sqrtN; ++k)
+
+  if (isSolved(sudoku, n) == 1)
   {
-    for (int l = startJ; l < startJ + sqrtN; ++l)
+    printSudoku(sudoku, n);
+  }
+
+  else
+  {
+    printf("No solution found");
+  }
+}
+
+// Check if the sudoku is solved
+int isSolved(int **sudoku, int n)
+{
+  for (int i = 0; i < n; ++i)
+  {
+    for (int j = 0; j < n; ++j)
     {
-      if (k != i && l != j && sudoku[k * n + l] == value)
+      if (sudoku[i][j] == 0)
       {
         return 0;
       }
@@ -153,45 +159,58 @@ int isCellValid(int *sudoku, int value, int i, int j, int sqrtN)
   return 1;
 }
 
-int isRowValid(int *sudoku, int value, int i,int sqrtN)
+int isCellValid(int **sudoku, int value, int i, int j, int sqrtN)
 {
-
-    int n = sqrtN * sqrtN;
-    for (int j = 0; j < n; ++j) 
+  for (int row = 0; row < sqrtN; ++row)
+  {
+    for (int col = 0; col < sqrtN; ++col)
     {
-        if (sudoku[i][j] == value) 
-        {
-            return 0
-        }
+      if (sudoku[row + i][col + j] == value)
+      {
+        return 0;
+      }
     }
-
-    return 1 
-
+  }
+  return 1;
 }
 
-int isColValid(int *sudoku, int value, int j,int sqrtN)
+int isRowValid(int **sudoku, int value, int i, int sqrtN)
 {
 
-    int n = sqrtN * sqrtN;
-    for (int i = 0; i < n; ++i) 
+  int n = sqrtN * sqrtN;
+  for (int j = 0; j < n; ++j)
+  {
+    if (sudoku[i][j] == value)
     {
-        if (sudoku[i][j] == value) 
-        {
-            return 0
-        }
+      return 0;
     }
+  }
 
-    return 1 
-
+  return 1;
 }
 
-int solveSudoku()
+int isColValid(int **sudoku, int value, int j, int sqrtN)
+{
 
-int main(void) {
+  int n = sqrtN * sqrtN;
+  for (int i = 0; i < n; ++i)
+  {
+    if (sudoku[i][j] == value)
+    {
+      return 0;
+    }
+  }
 
-    int n = 0;
-    int *sudoku = readSudoku(".sudoku-examples/sudoku.txt", &n);
+  return 1;
+}
 
-    return 0;
+int main(void)
+{
 
+  int n = 0;
+  int **sudoku = readSudoku(".sudoku-examples/sudoku.txt", &n);
+   iterativeSolveSudoku(**sudoku, n);
+   recursiveSolveSudoku(**sudoku, n);
+
+  return 0;
 }
