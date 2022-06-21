@@ -252,12 +252,6 @@ __global__ void bruteforceKernel(int sqrtN, int *solution, int *sudokuSpace, int
   myEmptyCells[threadIdx.x] = myEmptyCells[nEmptyCells - 1];
   myEmptyCells[nEmptyCells - 1] = emptyCell;
   int row = emptyCell / n, col = emptyCell % n; // get the row and column of the cell
-  if (threadId == 0)
-    for (int i = 0; i < n * n; ++i)
-    {
-      printf("%d ", mySudoku[i]);
-    }
-  printf("Thread %d, block %d | filling cell %d with current value %d (cel %d | row %d, col %d) n:%d \n", threadId, blockIdx.x, threadIdx.x, mySudoku[emptyCell], emptyCell, row, col, n);
   
   for (int testValue = 1; testValue <= n; ++testValue) // Try all possible values.
   {
@@ -398,19 +392,17 @@ int main(int argc, char *argv[])
     int *blockSudoku = expandedSudokuDevice + i * n * n; // get the grid sudoku (source to copy)
     for (int j = 0; j < nEmptyCells; ++j)                // for each thread
     {
-      // i := block id | realExpand := blockDim | j := thread id
-      int *threadSudoku = sudokuSpaceDevice + (i * realExpand + j) * n * n; // thread sudoku (destination)
+      // i := block id | nEmptyCells := blockDim | j := thread id
+      int *threadSudoku = sudokuSpaceDevice + (i * nEmptyCells + j) * n * n; // thread sudoku (destination)
       cudaMemcpy(threadSudoku, blockSudoku, n * n * sizeof(int), cudaMemcpyDeviceToDevice);
     }
   }
-  printSudokuDeviceKernel<<<1, 1>>>(sudokuSpaceDevice, sqrtN); // print sudoku on device
+  
   // clone empty cells array on device
   cudaMalloc((void **)&emptyCellsDevice, sizeof(int) * nEmptyCells * realExpand * nEmptyCells); // list of empty cells
   for (int i = 0; i < realExpand * nEmptyCells; ++i)
   {
     cudaMemcpy(emptyCellsDevice + i * nEmptyCells, emptyCells, nEmptyCells * sizeof(int), cudaMemcpyHostToDevice);
-    print_array<<<1, 1>>>(emptyCellsDevice + i * nEmptyCells, nEmptyCells);
-    cudaDeviceSynchronize();
   }
   // create the kernel and wait for it to finish
   printf("Starting kernel... (executing %d blocks with %d threads)\n", realExpand, nEmptyCells);
