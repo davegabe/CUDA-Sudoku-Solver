@@ -5,6 +5,16 @@
 #include <ctype.h>
 #include <unistd.h>
 
+// Print array kernel.
+__global__ void print_array(int *array, int size) {
+  if(threadIdx.x == 0) {
+    for(int i = 0; i < size; i++) {
+      printf("%d ", array[i]);
+    }
+    printf("\n");
+  }
+}
+
 // Print the sudoku kernel.
 __global__ void printSudokuDeviceKernel(int *sudoku, int sqrtN)
 {

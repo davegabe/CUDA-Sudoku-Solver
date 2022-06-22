@@ -236,7 +236,7 @@ __global__ void bruteforceKernel(int sqrtN, int *solution, int *sudokuSpace, int
   int n = sqrtN * sqrtN;
   int threadId = blockIdx.x * blockDim.x + threadIdx.x;
   int *myEmptyCells = emptyCells + threadId * nEmptyCells; // Get the empty cells for this thread.
-  int *mySudoku = sudokuSpace + threadId * n * n;    // Get the sudoku space for this thread.
+  int *mySudoku = sudokuSpace + threadId * n * n;          // Get the sudoku space for this thread.
 
   // Test if the sudoku is already solved.
   if (isSudokuSolved(mySudoku, sqrtN) == 1)
@@ -252,7 +252,7 @@ __global__ void bruteforceKernel(int sqrtN, int *solution, int *sudokuSpace, int
   myEmptyCells[threadIdx.x] = myEmptyCells[nEmptyCells - 1];
   myEmptyCells[nEmptyCells - 1] = emptyCell;
   int row = emptyCell / n, col = emptyCell % n; // get the row and column of the cell
-  
+
   for (int testValue = 1; testValue <= n; ++testValue) // Try all possible values.
   {
     // if sudoku has been solved already, return
@@ -294,33 +294,29 @@ int **BFSSudoku(int *sudoku, int sqrtN, int *count, int *emptyCells, int nEmptyC
   {
     if (isCellValid(sudoku, testValue, cell / n, cell % n, sqrtN) == 1)
     {
-      // create sudoku "solution" and set value to cell
-      int *solution = (int *)malloc(n * n * sizeof(int));
-      memcpy(solution, sudoku, n * n * sizeof(int));
-      solution[cell] = testValue;
+      sudoku[cell] = testValue;
       // try to get another level of sudoku
       int nBFSSolutions = 0;
       if (layers > 1)
       {
-        int **BFSSolutions = BFSSudoku(solution, sqrtN, &nBFSSolutions, emptyCells, nEmptyCells - 1, layers - 1);
+        int **BFSSolutions = BFSSudoku(sudoku, sqrtN, &nBFSSolutions, emptyCells, nEmptyCells - 1, layers - 1);
         if (BFSSolutions != NULL)
         {
           // append the solutions to the results
           results = (int **)realloc(results, (*count + nBFSSolutions) * sizeof(int *));
-          for (int i = 0; i < nBFSSolutions; ++i)
-          {
-            results[*count + i] = BFSSolutions[i];
-          }
+          memcpy(results + *count, BFSSolutions, nBFSSolutions * sizeof(int *));
           *count += nBFSSolutions;
         }
       }
       else
       {
-        // append the solution to the results
+        // append the sudoku (a solution) to the results
         results = (int **)realloc(results, (*count + 1) * sizeof(int *));
-        results[*count] = solution;
+        results[*count] = (int *)malloc(n * n * sizeof(int));
+        memcpy(results[*count], sudoku, n * n * sizeof(int));
         (*count)++;
       }
+      sudoku[cell] = 0;
     }
   }
   return results;
@@ -340,8 +336,30 @@ int *expandSudoku(int *sudoku, int sqrtN, int expandCells, int *count, int *empt
   }
   int *expandedSudoku = (int *)malloc(sizeof(int) * n * n);
 
-  // solve first cell
   *count = 0;
+
+  // for each empty cell, try to get a new sudoku
+  for (int i = 0; i < expandCells; ++i)
+  {
+    for (int j = 0; j < expandCells; ++j)
+    {
+      if (i == j)
+      {
+        continue;
+      }
+      for (int testValue = 1; testValue <= n; ++testValue)
+      {
+        int cell = emptyCells[nEmptyCells - 1];
+        int row = cell / n, col = cell % n;
+        // if the cell can be filled with the value, fill it and try to get a new sudoku
+        if (isCellValid(sudoku, testValue, row, col, sqrtN) == 1)
+        {
+          sudoku[cell] = testValue;
+        }
+      }
+    }
+  }
+
   int **solutions = BFSSudoku(sudoku, sqrtN, count, emptyCells, nEmptyCells, expandCells);
 
   // copy the solutions to the expanded sudoku
@@ -349,7 +367,7 @@ int *expandSudoku(int *sudoku, int sqrtN, int expandCells, int *count, int *empt
   for (int i = 0; i < *count; i++)
   {
     memcpy(expandedSudoku + i * n * n, solutions[i], n * n * sizeof(int));
-    free(solutions[i]);
+    // free(solutions[i]);
   }
   free(solutions);
   return expandedSudoku;
@@ -397,7 +415,7 @@ int main(int argc, char *argv[])
       cudaMemcpy(threadSudoku, blockSudoku, n * n * sizeof(int), cudaMemcpyDeviceToDevice);
     }
   }
-  
+
   // clone empty cells array on device
   cudaMalloc((void **)&emptyCellsDevice, sizeof(int) * nEmptyCells * realExpand * nEmptyCells); // list of empty cells
   for (int i = 0; i < realExpand * nEmptyCells; ++i)
