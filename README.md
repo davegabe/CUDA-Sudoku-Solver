@@ -3,6 +3,15 @@
 ## Description
 Sudoku solver that uses backtracking to solve the puzzle implemented in CUDA.
 
+## Metrics
+### GPU
+Solved 46 sudokus in 68.079806 seconds
+Average time: 1.479996 seconds
+
+### CPU
+Solved 46 sudokus in 0.366304 seconds
+Average time: 0.007963 seconds
+
 ## Working with hard sudoku puzzles
 The operating system’s GUI watchdog timer stops the kernel after about 2 seconds of execution. There are no guarantees that the kernel will finish executing the puzzle. To solve this problem you can change the timeout value(methods are os dependent), in the next section we will see how to do this on Windows.
 

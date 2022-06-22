@@ -7,7 +7,7 @@
 #include <string.h>
 #include <time.h>
 
-#define SUDOKU_PATH "./sudoku-examples/"
+#define SUDOKU_PATH "./sudoku-standard/"
 
 // Read the sudoku from file.
 int **readSudoku(const char *filename, int *n)
@@ -224,11 +224,11 @@ int main()
         continue;
 
       n_sudokus++;
-      char fileSudoku[100];
+      char fileSudoku[256];
       sprintf(fileSudoku, "%s%s", path, dir->d_name);
       printf("%s\n", fileSudoku);
       int n = 0;
-      int **sudoku = readSudoku("./sudoku-examples/sudoku.txt", &n);
+      int **sudoku = readSudoku(fileSudoku, &n);
 
       clock_t begin = clock();
       int isSolved = iterativeSolveSudoku(sudoku, n);
