@@ -1,10 +1,13 @@
+#include <dirent.h>
 #include <math.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <ctype.h>
-
 #include "debug.cu"
+
+#define EXPAND_PERCENTAGE 60
+#define SUDOKU_PATH "./sudoku-examples/"
 
 // Read the sudoku from file.
 int *readSudoku(const char *filename, int *n, int **emptyCells, int *nEmptyCells)
@@ -367,94 +370,118 @@ int *expandSudoku(int *sudoku, int sqrtN, int expandCells, int *count, int *empt
   for (int i = 0; i < *count; i++)
   {
     memcpy(expandedSudoku + i * n * n, solutions[i], n * n * sizeof(int));
-    // free(solutions[i]);
+    free(solutions[i]);
   }
   free(solutions);
   return expandedSudoku;
 }
 
-int main(int argc, char *argv[])
+int main()
 {
-  srand(time(NULL));
-  // # HOST #
-  int n = 0;
-  int nEmptyCells = 0;                                              // number of empty cells
-  int *emptyCells = NULL;                                           // list of empty cells
-  int *sudoku = readSudoku(argv[1], &n, &emptyCells, &nEmptyCells); // read sudoku from file, get the size of the sudoku and list of empty cells
-  int sqrtN = sqrt(n);
-  int expandCells = (int)atoi(argv[2]);
-  int isSolved = 0;
-  int realExpand = 1;
-  int *expandedSudoku = NULL;
+  DIR *d;
+  struct dirent *dir;
+  const char *path = SUDOKU_PATH;
 
-  // # DEVICE #
-  int *expandedSudokuDevice = NULL; // expanded sudoku
-  int *solutionDevice = NULL;       // address of the solution (ref sudokuSpace)
-  int *sudokuSpaceDevice = NULL;    // sudoku space for each thread
-  int *emptyCellsDevice = NULL;     // empty cells on sudoku
-  int *isSolvedDevice = NULL;       // is sudoku solved (int)
-
-  clock_t begin = clock();
-  expandedSudoku = expandSudoku(sudoku, sqrtN, expandCells, &realExpand, emptyCells, nEmptyCells); // expand the sudoku filling some empty cells
-  nEmptyCells -= expandCells;
-  cudaMalloc((void **)&expandedSudokuDevice, realExpand * n * n * sizeof(int));                               // alloc expanded sudoku to device
-  cudaMemcpy(expandedSudokuDevice, expandedSudoku, realExpand * n * n * sizeof(int), cudaMemcpyHostToDevice); // copy expanded sudoku to device
-  cudaMalloc((void **)&solutionDevice, n * n * sizeof(int));                                                  // create solution array on device
-  cudaMalloc((void **)&isSolvedDevice, sizeof(int));                                                          // create isSolved on device
-  cudaMemset(isSolvedDevice, 0, sizeof(int));                                                                 // set isSolved to 0
-
-  // clone expanded sudoku array on device
-  cudaMalloc((void **)&sudokuSpaceDevice, sizeof(int) * n * n * realExpand * nEmptyCells); // each thread has its own sudoku copy (n*n)
-  for (int i = 0; i < realExpand; ++i)                                                     // for each expanded sudoku (for each grid)
+  d = opendir(path);
+  long total_time = 0;
+  int n_sudokus = 0;
+  if (d)
   {
-    int *blockSudoku = expandedSudokuDevice + i * n * n; // get the grid sudoku (source to copy)
-    for (int j = 0; j < nEmptyCells; ++j)                // for each thread
+    while ((dir = readdir(d)) != NULL)
     {
-      // i := block id | nEmptyCells := blockDim | j := thread id
-      int *threadSudoku = sudokuSpaceDevice + (i * nEmptyCells + j) * n * n; // thread sudoku (destination)
-      cudaMemcpy(threadSudoku, blockSudoku, n * n * sizeof(int), cudaMemcpyDeviceToDevice);
+      if (dir->d_name[0] == '.')
+        continue;
+
+      n_sudokus++;
+      char fileSudoku[100];
+      sprintf(fileSudoku, "%s%s", path, dir->d_name);
+      printf("%s\n", fileSudoku);
+
+      // # HOST #
+      int n = 0;
+      int nEmptyCells = 0;                                                 // number of empty cells
+      int *emptyCells = NULL;                                              // list of empty cells
+      int *sudoku = readSudoku(fileSudoku, &n, &emptyCells, &nEmptyCells); // read sudoku from file, get the size of the sudoku and list of empty cells
+      int sqrtN = sqrt(n);
+      int expandCells = nEmptyCells * EXPAND_PERCENTAGE / 100; // expand EXPAND_PERCENTAGE% of empty cells
+      int isSolved = 0;
+      int realExpand = 1;
+      int *expandedSudoku = NULL;
+
+      // # DEVICE #
+      int *expandedSudokuDevice = NULL; // expanded sudoku
+      int *solutionDevice = NULL;       // address of the solution (ref sudokuSpace)
+      int *sudokuSpaceDevice = NULL;    // sudoku space for each thread
+      int *emptyCellsDevice = NULL;     // empty cells on sudoku
+      int *isSolvedDevice = NULL;       // is sudoku solved (int)
+
+      clock_t begin = clock();
+      expandedSudoku = expandSudoku(sudoku, sqrtN, expandCells, &realExpand, emptyCells, nEmptyCells); // expand the sudoku filling some empty cells
+      nEmptyCells -= expandCells;
+      cudaMalloc((void **)&expandedSudokuDevice, realExpand * n * n * sizeof(int));                               // alloc expanded sudoku to device
+      cudaMemcpy(expandedSudokuDevice, expandedSudoku, realExpand * n * n * sizeof(int), cudaMemcpyHostToDevice); // copy expanded sudoku to device
+      cudaMalloc((void **)&solutionDevice, n * n * sizeof(int));                                                  // create solution array on device
+      cudaMalloc((void **)&isSolvedDevice, sizeof(int));                                                          // create isSolved on device
+      cudaMemset(isSolvedDevice, 0, sizeof(int));                                                                 // set isSolved to 0
+
+      // clone expanded sudoku array on device
+      cudaMalloc((void **)&sudokuSpaceDevice, sizeof(int) * n * n * realExpand * nEmptyCells); // each thread has its own sudoku copy (n*n)
+      for (int i = 0; i < realExpand; ++i)                                                     // for each expanded sudoku (for each grid)
+      {
+        int *blockSudoku = expandedSudokuDevice + i * n * n; // get the grid sudoku (source to copy)
+        for (int j = 0; j < nEmptyCells; ++j)                // for each thread
+        {
+          // i := block id | nEmptyCells := blockDim | j := thread id
+          int *threadSudoku = sudokuSpaceDevice + (i * nEmptyCells + j) * n * n; // thread sudoku (destination)
+          cudaMemcpy(threadSudoku, blockSudoku, n * n * sizeof(int), cudaMemcpyDeviceToDevice);
+        }
+      }
+
+      // clone empty cells array on device
+      cudaMalloc((void **)&emptyCellsDevice, sizeof(int) * nEmptyCells * realExpand * nEmptyCells); // list of empty cells
+      for (int i = 0; i < realExpand * nEmptyCells; ++i)
+      {
+        cudaMemcpy(emptyCellsDevice + i * nEmptyCells, emptyCells, nEmptyCells * sizeof(int), cudaMemcpyHostToDevice);
+      }
+      // create the kernel and wait for it to finish
+      printf("Starting kernel... (executing %d blocks with %d threads)\n", realExpand, nEmptyCells);
+      bruteforceKernel<<<realExpand, nEmptyCells>>>(sqrtN, solutionDevice, sudokuSpaceDevice, emptyCellsDevice, nEmptyCells, isSolvedDevice);
+      cudaDeviceSynchronize();
+      printf("Kernel finished...\n");
+
+      // copy isSolved from device to host
+      cudaMemcpy(&isSolved, isSolvedDevice, sizeof(int), cudaMemcpyDeviceToHost);
+
+      clock_t end = clock();
+      total_time += (end - begin);
+
+      if (isSolved == 1)
+      {
+        // copy and print solution from device to host
+        cudaMemcpy(sudoku, solutionDevice, n * n * sizeof(int), cudaMemcpyDeviceToHost);
+        printSudoku(sudoku, sqrtN);
+        printf("Sudoku solved in %f seconds\n", (double)(end - begin) / CLOCKS_PER_SEC);
+      }
+      else
+      {
+        printf("Sudoku not solved!\n");
+      }
+
+      // free memory host
+      free(expandedSudoku);
+      free(emptyCells);
+      free(sudoku);
+      // free memory device
+      cudaFree(solutionDevice);
+      cudaFree(expandedSudokuDevice);
+      cudaFree(sudokuSpaceDevice);
+      cudaFree(emptyCellsDevice);
     }
+    closedir(d);
   }
-
-  // clone empty cells array on device
-  cudaMalloc((void **)&emptyCellsDevice, sizeof(int) * nEmptyCells * realExpand * nEmptyCells); // list of empty cells
-  for (int i = 0; i < realExpand * nEmptyCells; ++i)
-  {
-    cudaMemcpy(emptyCellsDevice + i * nEmptyCells, emptyCells, nEmptyCells * sizeof(int), cudaMemcpyHostToDevice);
-  }
-  // create the kernel and wait for it to finish
-  printf("Starting kernel... (executing %d blocks with %d threads)\n", realExpand, nEmptyCells);
-  bruteforceKernel<<<realExpand, nEmptyCells>>>(sqrtN, solutionDevice, sudokuSpaceDevice, emptyCellsDevice, nEmptyCells, isSolvedDevice);
-  cudaDeviceSynchronize();
-  printf("Kernel finished...\n");
-
-  // copy isSolved from device to host
-  cudaMemcpy(&isSolved, isSolvedDevice, sizeof(int), cudaMemcpyDeviceToHost);
-
-  clock_t end = clock();
-
-  if (isSolved == 1)
-  {
-    // copy and print solution from device to host
-    free(sudoku);
-    cudaMemcpy(sudoku, solutionDevice, n * n * sizeof(int), cudaMemcpyDeviceToHost);
-    printSudoku(sudoku, sqrtN);
-    printf("Sudoku solved in %f seconds\n", (double)(end - begin) / CLOCKS_PER_SEC);
-  }
-  else
-  {
-    printf("Sudoku not solved!\n");
-  }
-
-  // free memory host
-  free(expandedSudoku);
-  free(emptyCells);
-  free(sudoku);
-  // free memory device
-  cudaFree(solutionDevice);
-  cudaFree(expandedSudokuDevice);
-  cudaFree(sudokuSpaceDevice);
-  cudaFree(emptyCellsDevice);
+  printf("############################################################\n");
+  printf("Solved %d sudokus in %f seconds\n", n_sudokus, (double)total_time / CLOCKS_PER_SEC);
+  printf("Average time: %f seconds\n", (double)total_time / CLOCKS_PER_SEC / n_sudokus);
 
   return 0;
 }
